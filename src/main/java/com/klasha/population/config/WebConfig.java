@@ -31,7 +31,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(size))
                 .build();
         return WebClient.builder()
-                .defaultHeader("Accept", MediaType.ALL_VALUE)
                 .exchangeStrategies(strategies)
                 .build();
     }

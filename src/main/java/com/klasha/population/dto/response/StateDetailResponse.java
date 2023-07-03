@@ -5,9 +5,9 @@ import lombok.Data;
 import java.util.List;
 
 @Data
-public class CurrencyDetailResponse {
+public class StateDetailResponse {
     private boolean error;
     private int status;
     private String msg;
-    private List<CurrencyDetail> data;
+    private List<StateDetail> data;
 }

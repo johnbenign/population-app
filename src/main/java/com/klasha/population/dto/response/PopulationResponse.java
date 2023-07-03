@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -13,5 +14,5 @@ public class PopulationResponse{
     private boolean error;
     private int status;
     private String msg;
-    private Population data;
+    private List<Population> data;
 }

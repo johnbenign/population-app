@@ -6,6 +6,7 @@ import com.klasha.population.dto.response.CapitalDetailResponse;
 import com.klasha.population.dto.request.CurrencyConversionRequest;
 import com.klasha.population.dto.response.*;
 import com.klasha.population.exception.BadRequestException;
+import com.klasha.population.exception.NotFoundException;
 import com.klasha.population.service.CountryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,9 +15,12 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.util.UriBuilder;
 import reactor.core.publisher.Mono;
 
+import java.net.URI;
 import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,9 +43,11 @@ public class CountryServiceImpl implements CountryService {
     private String stateUrl;
 
     private final WebClient webClient;
-    private final RestTemplate restTemplate;
 
     private final Gson gson;
+
+    @Value("${currency.url}")
+    private String currencyUrl;
 
     @Override
     public GeneralResponse getCitiesByPopulation(long numberOfCities){
@@ -76,13 +82,13 @@ public class CountryServiceImpl implements CountryService {
     public GeneralResponse getCountryData(String country){
         CountryData countryData = new CountryData();
 
-        Population population = retrievePopulationData(country);
+        List<Population> populationData = retrievePopulationData(country);
         CapitalDetail capitalDetail = retrieveCapitalData(country);
         LocationDetail locationDetail = retrieveLocationDetail(country);
         String currency = getCurrency(country);
 
         countryData.setCurrency(currency);
-        countryData.setPopulation(population);
+        countryData.setPopulationData(populationData);
         countryData.setCapitalDetail(capitalDetail);
         countryData.setLocationDetail(locationDetail);
 
@@ -94,19 +100,14 @@ public class CountryServiceImpl implements CountryService {
     }
 
     private String getCurrency(String country) {
-        CountryDto dto = new CountryDto();
-        dto.setCountry(country);
-        Mono<CountryDto> requestMono = Mono.just(dto);
-
-        CurrencyDetailResponse response = webClient.post()
-                .uri(capitalUrl)
-                .body(requestMono, CountryDto.class)
+        CurrencyDetailResponse response = webClient.get()
+                .uri(currencyUrl)
                 .retrieve()
                 .bodyToMono(CurrencyDetailResponse.class)
                 .block();
         if(response.isError())
             throw new BadRequestException(response.getMsg());
-        CurrencyDetail currencyDetail = response.getData();
+        CurrencyDetail currencyDetail = response.getData().stream().filter(data -> data.getName().equalsIgnoreCase(country)).findFirst().orElseThrow(() -> new NotFoundException("Could not find the currency of this selected country"));
         return currencyDetail.getCurrency();
     }
 
@@ -144,23 +145,18 @@ public class CountryServiceImpl implements CountryService {
         return response.getData();
     }
 
-    private Population retrievePopulationData(String country) {
+    private List<Population> retrievePopulationData(String country) {
         CountryDto dto = new CountryDto();
         dto.setCountry(country);
 
-        Mono<CountryDto> requestMono = Mono.just(dto);
-
-        PopulationResponse response = webClient.post()
+        PopulationResponse response = webClient.get()
                 .uri(populationUrl)
-                .contentType(MediaType.valueOf("application/json"))
-                .body(requestMono, CountryDto.class)
-                .accept(MediaType.valueOf("*/*"))
                 .retrieve()
                 .bodyToMono(PopulationResponse.class)
                 .block();
         if(response.isError())
             throw new BadRequestException(response.getMsg());
-        return response.getData();
+        return response.getData().stream().filter(r -> r.getCountry().equalsIgnoreCase(country)).collect(Collectors.toList());
     }
 
     @Override
@@ -175,25 +171,34 @@ public class CountryServiceImpl implements CountryService {
     }
 
     private StateDetail retrieveStateDetails(String country) {
-        CountryDto dto = new CountryDto();
-        dto.setCountry(country);
+        try {
+            CountryDto dto = new CountryDto();
+            dto.setCountry(country);
 
-        GeneralResponse response = webClient.post()
-                .uri(stateUrl)
-                .body(dto, CountryDto.class)
-                .retrieve()
-                .bodyToMono(GeneralResponse.class)
-                .block();
-        if(response.isError())
-            throw new BadRequestException(response.getMsg());
-        StateDetail stateDetail = (StateDetail) response.getData();
-        stateDetail.getStates().forEach(state -> {
-            String stateName = state.getName().replace("State","").trim();
-            System.out.println("State Name : " + stateName);
-            List<String> cities = getCitiesByState(country, stateName);
-            state.setCities(cities);
-        });
-        return stateDetail;
+            StateDetailResponse response = webClient.get()
+                    .uri(stateUrl)
+//                .body(dto, CountryDto.class)
+                    .retrieve()
+                    .bodyToMono(StateDetailResponse.class)
+                    .block();
+            if (response.isError())
+                throw new BadRequestException(response.getMsg());
+            StateDetail stateDetail = response.getData().stream().filter(detail -> detail.getName().equalsIgnoreCase(country)).map(detail -> {
+                detail.getStates().forEach(state -> {
+                    String stateName = state.getName().replace("State", "").trim();
+                    System.out.println("State Name : " + stateName);
+                    List<String> cities = getCitiesByState(country, stateName);
+                    state.setCities(cities);
+                });
+                return detail;
+            }).findFirst().orElseThrow(() -> new NotFoundException("Country details not found"));
+
+            return stateDetail;
+        }
+        catch(Exception e){
+            e.printStackTrace();
+            throw new BadRequestException(e.getMessage());
+        }
     }
 
     private List<String> getCitiesByState(String country, String stateName) {
